@@ -1,0 +1,184 @@
+---
+- name: Ubuntu 24.04 LTS CIS Level 2 Hardening
+  hosts: ubuntu_servers
+  become: yes
+  tasks:
+    - name: Copy SSH key
+      authorized_key:
+        user: liam
+        state: present
+        key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+    # 1️⃣ System Updates & Patching
+    - name: Update and upgrade system packages
+      apt:
+        update_cache: yes
+        upgrade: full
+        autoremove: yes
+        autoclean: yes
+
+    - name: Enable automatic security updates
+      copy:
+        dest: "/etc/apt/apt.conf.d/20auto-upgrades"
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    # 2️⃣ Secure Boot & Kernel Hardening
+    - name: Configure kernel hardening
+      copy:
+        dest: "/etc/sysctl.d/99-hardening.conf"
+        content: |
+          net.ipv4.conf.all.accept_redirects = 0
+          net.ipv4.conf.all.secure_redirects = 0
+          net.ipv4.conf.all.send_redirects = 0
+          net.ipv4.icmp_echo_ignore_broadcasts = 1
+          net.ipv4.icmp_ignore_bogus_error_responses = 1
+          kernel.randomize_va_space = 2
+          fs.suid_dumpable = 0
+          kernel.kptr_restrict = 2
+      notify: Reload sysctl
+
+    # 3️⃣ User & Password Policies
+    - name: Disable root login
+      user:
+        name: root
+        password_lock: yes
+
+    - name: Enforce strong password policies
+      copy:
+        dest: "/etc/security/pwquality.conf"
+        content: |
+          minlen = 14
+          dcredit = -1
+          ucredit = -1
+          ocredit = -1
+          lcredit = -1
+          retry = 3
+
+    - name: Set password expiration policies
+      lineinfile:
+        path: "/etc/login.defs"
+        regex: "{{ item.regex }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regex: '^PASS_MAX_DAYS', line: 'PASS_MAX_DAYS 90' }
+        - { regex: '^PASS_MIN_DAYS', line: 'PASS_MIN_DAYS 7' }
+        - { regex: '^PASS_WARN_AGE', line: 'PASS_WARN_AGE 14' }
+
+    # 4️⃣ SSH Hardening
+    - name: Configure SSH security settings
+      copy:
+        dest: "/etc/ssh/sshd_config"
+        content: |
+          PermitRootLogin no
+          PasswordAuthentication no
+          PermitEmptyPasswords no
+          AllowUsers liam dcooper jjames nomma
+          ClientAliveInterval 300
+          ClientAliveCountMax 2
+          LogLevel VERBOSE
+      notify: Restart SSH
+
+  handlers:
+    - name: Restart SSH
+      systemd:
+        name: ssh   # Use 'ssh' instead of 'sshd' on Ubuntu 24.04
+        state: restarted
+
+    # 5️⃣ Install & Configure UFW Firewall
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+
+    - name: Set up firewall rules
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    # 6️⃣ Install Fail2Ban & Configure Security
+    - name: Install Fail2Ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Configure Fail2Ban for SSH
+      copy:
+        dest: "/etc/fail2ban/jail.local"
+        content: |
+          [sshd]
+          enabled = true
+          bantime = 3600
+          findtime = 600
+          maxretry = 3
+      notify: Restart Fail2Ban
+
+    # 7️⃣ Install & Configure Auditd
+    - name: Install Auditd
+      apt:
+        name: auditd
+        state: present
+
+    - name: Configure Auditd rules
+      copy:
+        dest: "/etc/audit/rules.d/audit.rules"
+        content: |
+          -w /etc/passwd -p wa -k identity
+          -w /etc/shadow -p wa -k identity
+          -w /etc/group -p wa -k identity
+      notify: Restart Auditd
+
+    # 8️⃣ Install Malware & Rootkit Protection
+    - name: Install ClamAV & RKHunter
+      apt:
+        name:
+          - clamav
+          - clamav-daemon
+          - rkhunter
+        state: present
+
+    - name: Update RKHunter
+      command: rkhunter --update
+
+    # 9️⃣ Enable Logwatch for Monitoring
+    - name: Install Logwatch
+      apt:
+        name: logwatch
+        state: present
+
+    # 🔟 Install Lynis for Compliance Auditing
+    - name: Install Lynis
+      apt:
+        name: lynis
+        state: present
+
+    - name: Schedule Weekly Compliance Audit
+      cron:
+        name: "Lynis Security Scan"
+        job: "/usr/sbin/lynis audit system --quick"
+        special_time: weekly
+
+  handlers:
+    - name: Reload sysctl
+      command: sysctl --system
+
+    - name: Restart SSH
+      systemd:
+        name: ssh
+        state: restarted
+
+    - name: Restart Fail2Ban
+      systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: Restart Auditd
+      systemd:
+        name: auditd
+        state: restarted
+

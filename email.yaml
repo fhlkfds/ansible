@@ -1,0 +1,90 @@
+---
+- name: Setup Email Server (Postfix + Dovecot)
+  hosts: mail_server
+  become: yes
+  vars:
+    mail_domain: "test.lan"
+    mail_user: "testuser"
+    mail_password: "testpassword"
+
+  tasks:
+    - name: Update apt packages
+      apt:
+        update_cache: yes
+
+    - name: Install Postfix, Dovecot, and Mail Utilities
+      apt:
+        name:
+          - postfix
+          - dovecot-core
+          - dovecot-imapd
+          - dovecot-pop3d
+          - mailutils
+        state: present
+
+    - name: Configure Postfix
+      template:
+        src: postfix_main.cf.j2
+        dest: /etc/postfix/main.cf
+      notify: Restart Postfix
+
+    - name: Configure Dovecot mail location
+      lineinfile:
+        path: /etc/dovecot/conf.d/10-mail.conf
+        regexp: '^mail_location ='
+        line: 'mail_location = maildir:~/Maildir'
+      notify: Restart Dovecot
+
+    - name: Configure Dovecot authentication
+      lineinfile:
+        path: /etc/dovecot/conf.d/10-auth.conf
+        regexp: '^disable_plaintext_auth ='
+        line: 'disable_plaintext_auth = no'
+
+    - name: Set authentication mechanisms
+      lineinfile:
+        path: /etc/dovecot/conf.d/10-auth.conf
+        regexp: '^auth_mechanisms ='
+        line: 'auth_mechanisms = plain login'
+      notify: Restart Dovecot
+
+    - name: Create mail user
+      user:
+        name: "{{ mail_user }}"
+        password: "{{ mail_password | password_hash('sha512') }}"
+        home: "/home/{{ mail_user }}"
+        shell: /bin/bash
+
+    - name: Ensure Maildir exists for the user
+      file:
+        path: "/home/{{ mail_user }}/Maildir"
+        state: directory
+        owner: "{{ mail_user }}"
+        group: "{{ mail_user }}"
+        mode: '0755'
+
+    - name: Allow email-related ports in UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - 25  # SMTP
+        - 110 # POP3
+        - 143 # IMAP
+        - 465 # SMTPS
+        - 587 # Submission
+        - 993 # IMAPS
+        - 995 # POP3S
+
+  handlers:
+    - name: Restart Postfix
+      service:
+        name: postfix
+        state: restarted
+
+    - name: Restart Dovecot
+      service:
+        name: dovecot
+        state: restarted
+

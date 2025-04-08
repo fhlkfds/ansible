@@ -1,0 +1,444 @@
+---
+- name: "CIS Debian 12 Level 2 Server Hardening"
+  hosts: debian
+  become: yes
+  gather_facts: yes
+
+  vars:
+    ######################################################
+    # Customize these variables for your environment
+    ######################################################
+    ssh_server_config_file: /etc/ssh/sshd_config
+    ssh_port: 2222
+
+    # Common sysctl settings for network hardening
+    cis_sysctl_settings:
+      net.ipv4.ip_forward: 0                      # (CIS 3.3.1)
+      net.ipv4.conf.all.send_redirects: 0         # (CIS 3.3.2)
+      net.ipv4.conf.default.send_redirects: 0     # (CIS 3.3.2)
+      net.ipv4.conf.all.accept_redirects: 0       # (CIS 3.3.5)
+      net.ipv4.conf.default.accept_redirects: 0   # (CIS 3.3.5)
+      net.ipv6.conf.all.accept_redirects: 0       # (CIS 3.3.6)
+      net.ipv6.conf.default.accept_redirects: 0   # (CIS 3.3.6)
+      net.ipv4.conf.all.secure_redirects: 0       # (CIS 3.3.6)
+      net.ipv4.conf.default.secure_redirects: 0   # (CIS 3.3.6)
+      net.ipv4.conf.all.accept_source_route: 0    # (CIS 3.3.8)
+      net.ipv6.conf.all.accept_source_route: 0    # (CIS 3.3.8)
+      net.ipv4.icmp_echo_ignore_broadcasts: 1     # (CIS 3.3.4)
+      net.ipv4.icmp_ignore_bogus_error_responses: 1  # (CIS 3.3.3)
+      net.ipv4.tcp_syncookies: 1                  # (CIS 3.3.10)
+      net.ipv4.conf.all.log_martians: 1           # (CIS 3.3.9)
+      net.ipv4.conf.default.log_martians: 1       # (CIS 3.3.9)
+
+    # Packages and services typically removed for minimal Level 2
+    cis_remove_packages:
+      - nis
+      - rsh-client
+      - telnet
+      - ldap-utils
+      - ftp
+      - talk
+      - nfs-common    # if not needed
+      - rpcbind       # if not needed
+      - avahi-daemon
+      - xinetd
+      - snmp
+      - samba
+
+  ######################################################
+  #               HANDLERS
+  ######################################################
+  handlers:
+    - name: restart sshd
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+    - name: "Run update-grub"
+      ansible.builtin.command: update-grub
+      changed_when: true
+
+    - name: reload sysctl
+      ansible.builtin.command: sysctl -p
+      changed_when: false
+
+  ######################################################
+  #               TASKS
+  ######################################################
+  tasks:
+
+    #################################################################
+    # 1.1.1.x - Disable Unnecessary or Uncommon Filesystem Modules
+    #################################################################
+    - name: "1.1.1.x | Create modprobe.d directory if needed"
+      file:
+        path: /etc/modprobe.d
+        state: directory
+        mode: "0755"
+
+    - name: "1.1.1.1 | Ensure cramfs kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install cramfs /bin/false"
+        - "blacklist cramfs"
+      register: disable_cramfs
+      changed_when: disable_cramfs is changed
+      tags: ["CIS","1.1.1.1"]
+      # Explanation: Removes support for the unneeded cramfs filesystem.
+
+    - name: "1.1.1.2 | Ensure freevxfs kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install freevxfs /bin/false"
+        - "blacklist freevxfs"
+      tags: ["CIS","1.1.1.2"]
+      # Explanation: Removes support for unneeded freevxfs filesystem.
+
+    - name: "1.1.1.3 | Ensure hfs kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install hfs /bin/false"
+        - "blacklist hfs"
+      tags: ["CIS","1.1.1.3"]
+
+    - name: "1.1.1.4 | Ensure hfsplus kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install hfsplus /bin/false"
+        - "blacklist hfsplus"
+      tags: ["CIS","1.1.1.4"]
+
+    - name: "1.1.1.5 | Ensure jffs2 kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install jffs2 /bin/false"
+        - "blacklist jffs2"
+      tags: ["CIS","1.1.1.5"]
+
+    - name: "1.1.1.6 | Ensure overlayfs kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install overlay /bin/false"
+        - "blacklist overlay"
+      tags: ["CIS","1.1.1.6"]
+
+    - name: "1.1.1.7 | Ensure squashfs kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install squashfs /bin/false"
+        - "blacklist squashfs"
+      tags: ["CIS","1.1.1.7"]
+
+    - name: "1.1.1.8 | Ensure udf kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install udf /bin/false"
+        - "blacklist udf"
+      tags: ["CIS","1.1.1.8"]
+
+    - name: "1.1.1.9 | Ensure usb-storage kernel module is disabled"
+      lineinfile:
+        path: /etc/modprobe.d/cis.conf
+        create: true
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "install usb-storage /bin/false"
+        - "blacklist usb-storage"
+      tags: ["CIS","1.1.1.9"]
+      # Explanation: Reduces risk of data exfiltration from removable drives.
+
+    # 1.1.2.x - Ensure separate partitions exist for critical directories
+    # NOTE: Partitioning tasks are typically manual or require reformatting.
+    # Marked as manual review.
+    - name: "1.1.2.x | [MANUAL REVIEW] Ensure separate partitions exist for /tmp, /var, /home, etc."
+      debug:
+        msg: >
+          CIS requires /tmp, /var, /var/tmp, /var/log, /var/log/audit, /home
+          to be on separate partitions with nodev/noexec/nosuid where applicable.
+          This is typically done manually at install time or requires partitioning tools.
+      tags: ["CIS","1.1.2"]
+      # Explanation: These changes often involve repartitioning/reformatting the disk.
+
+    #################################################################
+    # 1.2.x - Package Management
+    # This includes ensuring GPG keys, repository config, etc.
+    # Typically partial automation; GPG keys & repository checks may be manual.
+    #################################################################
+    - name: "1.2.2.1 | [MANUAL REVIEW] Ensure updates, patches, and security software are installed"
+      debug:
+        msg: >
+          Use your preferred patch mechanism (apt/yum/other),
+          and ensure your system is fully up-to-date regularly.
+      tags: ["CIS","1.2.2.1"]
+      # Explanation: Ensure the system is fully up-to-date with security patches.
+
+    #################################################################
+    # 1.3.x - Mandatory Access Control (AppArmor)
+    #################################################################
+    - name: "1.3.1.1 | Ensure AppArmor is installed"
+      package:
+        name: apparmor
+        state: present
+      tags: ["CIS","1.3.1.1"]
+      # Explanation: AppArmor is the default MAC in Debian; ensure it's installed.
+
+    - name: "1.3.1.2 | Ensure AppArmor is enabled in bootloader"
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX='
+        line: 'GRUB_CMDLINE_LINUX="apparmor=1 security=apparmor"'
+        backup: yes
+      notify: "Run update-grub"
+      tags: ["CIS","1.3.1.2"]
+      # Explanation: Forces the kernel to load with AppArmor active.
+
+    - name: "Update grub after enabling AppArmor"
+      when: disable_cramfs is changed  # or any condition
+      block:
+        - name: "Run update-grub"
+          ansible.builtin.command: update-grub
+        - name: "Reboot system to apply changes [MANUAL REVIEW]"
+          debug:
+            msg: "A reboot may be required to fully apply kernel parameters."
+      tags: ["CIS","1.3.1.2"]
+
+    #################################################################
+    # 2.x - Services: Remove or disable unneeded network services
+    #################################################################
+    - name: "2.x | Remove packages that provide unneeded services"
+      apt:
+        pkg: "{{ cis_remove_packages }}"
+        state: absent
+        autoremove: yes
+      tags: ["CIS","2.1"]
+      # Explanation: Minimizes the attack surface by removing these packages.
+
+    # 2.1.x - Ensure only approved services run
+    - name: "2.1.x | [MANUAL REVIEW] Ensure only approved services are listening"
+      debug:
+        msg: >
+          Use 'netstat -tuln' or 'ss -tuln' and verify only authorized services
+          are listening on network interfaces. This often requires manual checks.
+      tags: ["CIS","2.1"]
+
+    #################################################################
+    # 3.x - Network Configuration
+    #################################################################
+    - name: "3.3.x | Apply sysctl settings for network parameters"
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: no
+      loop: "{{ cis_sysctl_settings|dict2items }}"
+      notify: reload sysctl
+      tags: ["CIS","3.3"]
+      # Explanation: Disables IP forwarding, source routing, ICMP redirects, etc.
+
+    #################################################################
+    # 4.x - Firewall Configuration (Example: ufw or nftables)
+    #################################################################
+    - name: "4.1.x | Ensure ufw is installed"
+      package:
+        name: ufw
+        state: present
+      tags: ["CIS","4.2.1"]
+
+    - name: "4.1.x | Ensure ufw is enabled"
+      ufw:
+        state: enabled
+        logging: 'on'
+        direction: incoming
+        policy: deny
+      tags: ["CIS","4.2.3"]
+      # Explanation: Default deny incoming. Adjust to suit your environment.
+
+    - name: "4.1.x | Allow SSH inbound on configured ssh_port"
+      ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+      tags: ["CIS","4.2"]
+
+    # OR if using nftables, remove ufw and configure nft as needed.
+
+    #################################################################
+    # 5.1.x - Configure SSH Server
+    #################################################################
+    - name: "5.1.1 | Ensure permissions on /etc/ssh/sshd_config are configured"
+      file:
+        path: "{{ ssh_server_config_file }}"
+        owner: root
+        group: root
+        mode: '0600'
+      tags: ["CIS","5.1.1"]
+      # Explanation: Restrict SSH config to root owner and minimal perms.
+
+    - name: "5.1.x | Harden sshd_config"
+      lineinfile:
+        path: "{{ ssh_server_config_file }}"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      loop:
+        - { regexp: '^#?Port ', line: "Port {{ ssh_port }}" }
+        - { regexp: '^#?PermitRootLogin ', line: 'PermitRootLogin no' }               # (CIS 5.1.20)
+        - { regexp: '^#?PermitEmptyPasswords ', line: 'PermitEmptyPasswords no' }     # (CIS 5.1.19)
+        - { regexp: '^#?PasswordAuthentication ', line: 'PasswordAuthentication yes' }# or 'no' if using keys only
+        - { regexp: '^#?Protocol ', line: 'Protocol 2' }
+        - { regexp: '^#?ClientAliveInterval ', line: 'ClientAliveInterval 300' }       # (CIS 5.1.7)
+        - { regexp: '^#?ClientAliveCountMax ', line: 'ClientAliveCountMax 0' }         # (CIS 5.1.7)
+        - { regexp: '^#?LogLevel ', line: 'LogLevel VERBOSE' }                        # (CIS 5.1.14)
+      notify: restart sshd
+      tags: ["CIS","5.1"]
+
+    #################################################################
+    # 5.2.x - Configure sudo
+    #################################################################
+    - name: "5.2.1 | Ensure sudo is installed"
+      apt:
+        name: sudo
+        state: present
+      tags: ["CIS","5.2.1"]
+      # Explanation: Provides controlled privilege escalation.
+
+    - name: "5.2.x | Ensure sudo use is logged"
+      lineinfile:
+        path: /etc/sudoers
+        regexp: '^Defaults.*?use_pty'
+        line: 'Defaults use_pty'
+        state: present
+        validate: 'visudo -cf %s'
+      tags: ["CIS","5.2.2"]
+      # Explanation: Forces use of a pty so that commands can be logged properly.
+
+    #################################################################
+    # 5.4.x - User Accounts and Environment
+    #################################################################
+    - name: "5.4.1.x | [MANUAL REVIEW] Configure password expiration, complexity, etc."
+      debug:
+        msg: >
+          Use /etc/login.defs, chage, and pam_pwquality to set password 
+          max/min days, lockout, complexity. Some parameters are environment-specific.
+      tags: ["CIS","5.4.1"]
+      # Explanation: Configure password policies as required.
+
+    #################################################################
+    # 6.x - Logging and Auditing
+    #################################################################
+    - name: "6.1.x | Ensure rsyslog is installed"
+      apt:
+        name: rsyslog
+        state: present
+      tags: ["CIS","6.1.3"]
+
+    - name: "6.1.x | Enable and start rsyslog service"
+      service:
+        name: rsyslog
+        state: started
+        enabled: true
+      tags: ["CIS","6.1.3"]
+
+    - name: "6.2.1.x | Ensure auditd is installed"
+      apt:
+        name: auditd
+        state: present
+      tags: ["CIS","6.2.1.1"]
+
+    - name: "6.2.1.x | Enable and start auditd service"
+      service:
+        name: auditd
+        state: started
+        enabled: true
+      tags: ["CIS","6.2.1.2"]
+
+    - name: "6.2.3.x | Configure audit rules"
+      blockinfile:
+        path: /etc/audit/rules.d/cis.rules
+        create: yes
+        block: |
+          -w /etc/sudoers -p wa -k scope
+          -w /etc/sudoers.d -p wa -k scope
+          ...
+      register: auditd_rules_config
+      tags: ["CIS","6.2.3"]
+
+    - name: "Restart auditd if changes were made"
+      service:
+        name: auditd
+        state: restarted
+      when: auditd_rules_config.changed
+      tags: ["CIS","6.2"]
+
+    #################################################################
+    # 7.x - System Maintenance
+    #################################################################
+    - name: "7.1.x | Ensure permissions on critical files"
+      block:
+        - name: "Ensure /etc/passwd permissions"
+          file:
+            path: /etc/passwd
+            owner: root
+            group: root
+            mode: '0644'
+        - name: "Ensure /etc/shadow permissions"
+          file:
+            path: /etc/shadow
+            owner: root
+            group: shadow
+            mode: '0640'
+        - name: "Ensure /etc/gshadow permissions"
+          file:
+            path: /etc/gshadow
+            owner: root
+            group: shadow
+            mode: '0640'
+      tags: ["CIS","7.1"]
+      # Explanation: Restrict access to critical system files.
+
+    - name: "7.2.x | [MANUAL REVIEW] Inspect for duplicate UIDs, GIDs, etc."
+      debug:
+        msg: >
+          Use scripts or commands to detect and fix duplicate UIDs/GIDs and locked accounts.
+          This step is environment-specific.
+      tags: ["CIS","7.2"]
+
+    #################################################################
+    # End of main tasks
+    #################################################################
+    - name: "CIS Level 2 Hardening - Completion Note"
+      debug:
+        msg: "Completed CIS Debian 12 Level 2 playbook. Some tasks require manual review above."
+

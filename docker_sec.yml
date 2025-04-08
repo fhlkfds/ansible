@@ -1,0 +1,185 @@
+---
+- name: Secure Application Containers (NIST 800-190)
+  hosts: all
+  become: yes
+
+  vars_prompt:
+    - name: "trusted_registry"
+      prompt: "Enter your trusted container registry (leave empty to skip image validation)"
+      private: no
+
+    - name: "log_server"
+      prompt: "Enter your log server address (leave empty to skip logging setup)"
+      private: no
+
+    - name: "enable_tls"
+      prompt: "Enable TLS for Docker? (yes/no)"
+      private: no
+
+  tasks:
+    # --- Ensure Docker is Installed ---
+    - name: Check if Docker is installed
+      stat:
+        path: /usr/bin/docker
+      register: docker_binary
+
+    - name: Fail if Docker is not installed
+      fail:
+        msg: "Docker is not installed! Please install it before running this playbook."
+      when: not docker_binary.stat.exists
+
+    # --- Ensure Docker Configuration Directory Exists ---
+    - name: Ensure Docker configuration directory exists
+      file:
+        path: "/etc/docker"
+        state: directory
+        mode: '0755'
+
+    # --- Ensure Seccomp Profile Exists ---
+    - name: Ensure Seccomp profile directory exists
+      file:
+        path: "/usr/share/docker"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure Docker default Seccomp profile exists
+      get_url:
+        url: "https://raw.githubusercontent.com/moby/moby/master/profiles/seccomp/default.json"
+        dest: "/usr/share/docker/seccomp.json"
+        mode: '0644'
+
+    # --- TLS Certificate Handling ---
+    - name: Check if Docker TLS certificates exist
+      stat:
+        path: "/etc/docker/server-cert.pem"
+      register: cert_file
+
+    - name: Generate TLS certificates for Docker if missing
+      shell: |
+        sudo openssl req -newkey rsa:4096 -nodes -keyout /etc/docker/server-key.pem -x509 -days 365 -out /etc/docker/server-cert.pem -subj "/CN=server"
+      when: enable_tls | lower == 'yes' and not cert_file.stat.exists
+
+    # --- Configure Docker Daemon ---
+    - name: Ensure a valid Docker configuration file exists (TLS enabled)
+      copy:
+        dest: "/etc/docker/daemon.json"
+        content: |
+          {
+            "tls": true,
+            "tlscert": "/etc/docker/server-cert.pem",
+            "tlskey": "/etc/docker/server-key.pem",
+            "seccomp-profile": "/usr/share/docker/seccomp.json",
+            "no-new-privileges": true,
+            "userns-remap": "default",
+            "iptables": true
+          }
+        mode: '0644'
+      when: enable_tls | lower == 'yes'
+      notify: Restart Docker
+
+    - name: Ensure a valid Docker configuration file exists (TLS disabled)
+      copy:
+        dest: "/etc/docker/daemon.json"
+        content: |
+          {
+            "seccomp-profile": "/usr/share/docker/seccomp.json",
+            "no-new-privileges": true,
+            "userns-remap": "default",
+            "iptables": true
+          }
+        mode: '0644'
+      when: enable_tls | lower != 'yes'
+      notify: Restart Docker
+
+    # --- Secure Image Management (Only if Registry is Provided) ---
+    - name: Validate images from trusted registry
+      shell: "docker images | grep -E '^{{ trusted_registry }}/'"
+      register: image_check
+      changed_when: false
+      failed_when: image_check.rc != 0
+      when: docker_binary.stat.exists and trusted_registry | length > 0
+
+    - name: Ensure images are signed and verified
+      shell: "docker trust inspect --pretty {{ trusted_registry }}/signed-image"
+      register: signature_check
+      changed_when: false
+      failed_when: "'Signed' not in signature_check.stdout"
+      when: docker_binary.stat.exists and trusted_registry | length > 0
+
+    - name: Scan images for vulnerabilities
+      command: "trivy image {{ trusted_registry }}/secure-image:latest"
+      register: image_scan
+      changed_when: false
+      failed_when: "'CRITICAL' in image_scan.stdout"
+      when: docker_binary.stat.exists and trusted_registry | length > 0
+
+    # --- Runtime Security Controls ---
+    - name: Ensure CA certificates are installed
+      package:
+        name: ca-certificates
+        state: present
+
+    - name: Ensure AuditD is installed
+      package:
+        name: auditd
+        state: present
+
+    - name: Ensure audit rules directory exists
+      file:
+        path: /etc/audit/rules.d
+        state: directory
+        mode: '0755'
+
+    - name: Ensure audit rules file exists
+      copy:
+        dest: "/etc/audit/rules.d/audit.rules"
+        content: ""
+        force: no
+        mode: '0644'
+
+    - name: Enable audit logging for container events
+      lineinfile:
+        path: "/etc/audit/rules.d/audit.rules"
+        line: "-w /var/lib/docker -p wa -k container_security"
+      notify: Restart AuditD
+
+    # --- Set Resource Limits (Skip If No Containers Are Running) ---
+    - name: Check if any containers are running
+      command: "docker ps --quiet"
+      register: running_containers
+      changed_when: false
+      failed_when: false
+      when: docker_binary.stat.exists
+
+    - name: Set CPU and memory limits on running containers
+      command: "docker update --cpu-shares 512 --memory 256m {{ item }}"
+      loop: "{{ running_containers.stdout_lines }}"
+      when: docker_binary.stat.exists and running_containers.stdout_lines | length > 0
+
+    # --- Logging and Monitoring (Only if Log Server is Provided) ---
+    - name: Configure centralized logging
+      copy:
+        dest: "/etc/rsyslog.d/container-logs.conf"
+        content: |
+          *.*  @{{ log_server }}:514
+      notify: Restart Rsyslog
+      when: log_server | length > 0
+
+  handlers:
+    - name: Restart Docker
+      service:
+        name: docker
+        state: restarted
+      when: docker_binary.stat.exists
+
+    - name: Restart Rsyslog
+      service:
+        name: rsyslog
+        state: restarted
+      when: log_server | length > 0
+
+    - name: Restart AuditD
+      service:
+        name: auditd
+        state: restarted
+

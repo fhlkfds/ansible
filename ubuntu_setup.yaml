@@ -1,0 +1,59 @@
+---
+- name: Install Docker on Ubuntu 24.04 LTS
+  hosts: all
+  become: true
+  vars:
+    docker_gpg_url: "https://download.docker.com/linux/ubuntu/gpg"
+    docker_repo_url: "https://download.docker.com/linux/ubuntu"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+        state: present
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: "{{ docker_gpg_url }}"
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }}] {{ docker_repo_url }} {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Ensure Docker service is running and enabled
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Verify Docker installation
+      command: docker run hello-world
+      register: docker_test
+      changed_when: false
+
+    - name: Display Docker test result
+      debug:
+        var: docker_test.stdout_lines
+

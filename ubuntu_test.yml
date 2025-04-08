@@ -1,0 +1,153 @@
+- hosts: vps
+  become: yes
+  vars:
+    username: liam
+    user_password: PW4nomma!
+    ssh_public_key: "{{ lookup('env', 'HOME') + '/.ssh/id_rsa.pub' }}"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - sudo
+          - net-tools
+          - neovim
+          - bat
+          - fail2ban
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - python3-setuptools
+        state: present
+
+    - name: Create user {{ username }}
+      user:
+        name: "{{ username }}"
+        shell: /bin/bash
+        createhome: yes
+        groups: 
+          - sudo
+        append: yes
+
+    - name: Set user password
+      ansible.builtin.shell: 
+        cmd: echo "{{ username }}:{{ user_password }}" | chpasswd
+      changed_when: false
+
+    - name: Ensure .ssh directory exists
+      file:
+        path: "/home/{{ username }}/.ssh"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: '0700'
+
+    - name: Add SSH public key
+      authorized_key:
+        user: "{{ username }}"
+        key: "{{ lookup('file', ssh_public_key) }}"
+        state: present
+
+    - name: Configure SSH
+      block:
+        - name: Modify SSH config
+          lineinfile:
+            path: /etc/ssh/sshd_config
+            regexp: "{{ item.regexp }}"
+            line: "{{ item.line }}"
+            validate: 'sshd -t -f %s'
+          loop:
+            - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
+            - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+            - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 3' }
+            - { regexp: '^#?AllowUsers', line: 'AllowUsers {{ username }}' }
+          notify: Restart SSH
+
+    - name: Configure Fail2Ban for SSH
+      block:
+        - name: Copy Fail2Ban jail local configuration
+          copy:
+            dest: /etc/fail2ban/jail.local
+            content: |
+              [DEFAULT]
+              bantime = 3600
+              findtime = 600
+              maxretry = 3
+
+              [sshd]
+              enabled = true
+              port = ssh
+              filter = sshd
+              logpath = /var/log/auth.log
+              maxretry = 3
+            owner: root
+            group: root
+            mode: '0644'
+          notify: Restart Fail2Ban
+
+    - name: Install Docker on Ubuntu
+      block:
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+
+        - name: Add Docker repository
+          apt_repository:
+            repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+            state: present
+            filename: docker
+
+        - name: Install Docker packages
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: yes
+
+        - name: Add user to docker group
+          user:
+            name: "{{ username }}"
+            groups: docker
+            append: yes
+
+    - name: Install Certbot for Let's Encrypt
+      block:
+        - name: Ensure software-properties-common is installed
+          apt:
+            name: software-properties-common
+            state: present
+
+        - name: Add Certbot PPA
+          apt_repository:
+            repo: ppa:certbot/certbot
+            state: present
+
+        - name: Install Certbot
+          apt:
+            name: certbot
+            state: present
+            update_cache: yes
+
+  handlers:
+    - name: Restart SSH
+      systemd:
+        name: ssh
+        state: restarted
+
+    - name: Restart Fail2Ban
+      systemd:
+        name: fail2ban
+        state: restarted
+

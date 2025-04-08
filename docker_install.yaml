@@ -1,0 +1,63 @@
+---
+- name: Install Docker and Docker Compose on Ubuntu
+  hosts: ubuntu_servers
+  become: yes
+  vars:
+    docker_package: "docker.io"
+    docker_compose_url: "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64"
+    docker_compose_path: "/usr/local/bin/docker-compose"
+
+  tasks:
+    - name: Ensure apt is updated
+      apt:
+        update_cache: yes
+      changed_when: false
+
+    - name: Check if Docker is installed
+      command: "docker --version"
+      register: docker_installed
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install Docker if not present
+      apt:
+        name: "{{ docker_package }}"
+        state: present
+      when: docker_installed.rc != 0
+      notify: Restart Docker
+
+    - name: Reload systemd to recognize Docker service
+      command: systemctl daemon-reload
+      when: docker_installed.rc != 0
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker.service
+        enabled: yes
+        state: started
+      when: docker_installed.rc != 0
+
+    - name: Check if Docker Compose is installed
+      stat:
+        path: "{{ docker_compose_path }}"
+      register: docker_compose_exists
+
+    - name: Install Docker Compose if not present
+      get_url:
+        url: "{{ docker_compose_url }}"
+        dest: "{{ docker_compose_path }}"
+        mode: '0755'
+      when: not docker_compose_exists.stat.exists
+
+    - name: Ensure user liam is in the Docker group
+      user:
+        name: liam
+        groups: docker
+        append: yes
+
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker.service
+        state: restarted
+
