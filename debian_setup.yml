@@ -2,8 +2,8 @@
 - hosts: debian
   become: yes
   vars:
-    username: liam
-    user_password: mail
+    username: user
+    user_password: password
     ssh_public_key: "{{ lookup('env', 'HOME') + '/.ssh/id_rsa.pub' }}"
 
   tasks:
